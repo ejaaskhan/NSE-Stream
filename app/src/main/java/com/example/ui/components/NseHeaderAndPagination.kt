@@ -26,7 +26,11 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -35,7 +39,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,10 +53,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.BuildConfig
 import com.example.R
+import com.example.data.remote.ApiConfig
 import com.example.model.MovieCategory
 import com.example.ui.theme.BebasNeueFontFamily
 import com.example.ui.theme.CharcoalSurface
@@ -83,30 +95,21 @@ fun NseBrandLogo(
                 contentScale = ContentScale.Crop
             )
         }
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "NSE",
-                    fontFamily = BebasNeueFontFamily,
-                    fontSize = 26.sp,
-                    color = NseCrimson,
-                    letterSpacing = 1.5.sp
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = "STREAM",
-                    fontFamily = BebasNeueFontFamily,
-                    fontSize = 26.sp,
-                    color = CrispWhite,
-                    letterSpacing = 1.5.sp
-                )
-            }
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = "MOVIELINKBD CINEMA",
-                style = MaterialTheme.typography.labelSmall,
-                color = MutedSilver,
-                fontSize = 9.sp,
-                letterSpacing = 1.1.sp
+                text = "NSE",
+                fontFamily = BebasNeueFontFamily,
+                fontSize = 26.sp,
+                color = NseCrimson,
+                letterSpacing = 1.5.sp
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = "STREAM",
+                fontFamily = BebasNeueFontFamily,
+                fontSize = 26.sp,
+                color = CrispWhite,
+                letterSpacing = 1.5.sp
             )
         }
     }
@@ -119,6 +122,7 @@ fun NseTopNavigationBar(
     isSearchExpanded: Boolean,
     watchlistCount: Int,
     onToggleSearch: () -> Unit,
+    onOpenServerSettings: () -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onSearchSubmit: (String) -> Unit,
     onClearSearch: () -> Unit,
@@ -152,19 +156,39 @@ fun NseTopNavigationBar(
                 modifier = Modifier.testTag("nse_brand_logo")
             )
 
-            IconButton(
-                onClick = onToggleSearch,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(if (isSearchExpanded) NseCrimson else GraphiteElevated)
-                    .testTag("search_toggle_button")
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(
-                    imageVector = if (isSearchExpanded) Icons.Default.Close else Icons.Default.Search,
-                    contentDescription = if (isSearchExpanded) "Close Search" else "Open Search",
-                    tint = CrispWhite
-                )
+                IconButton(
+                    onClick = onOpenServerSettings,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(GraphiteElevated)
+                        .testTag("server_settings_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Dns,
+                        contentDescription = "Server Settings",
+                        tint = MutedSilver
+                    )
+                }
+
+                IconButton(
+                    onClick = onToggleSearch,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(if (isSearchExpanded) NseCrimson else GraphiteElevated)
+                        .testTag("search_toggle_button")
+                ) {
+                    Icon(
+                        imageVector = if (isSearchExpanded) Icons.Default.Close else Icons.Default.Search,
+                        contentDescription = if (isSearchExpanded) "Close Search" else "Open Search",
+                        tint = CrispWhite
+                    )
+                }
             }
         }
 
@@ -267,4 +291,113 @@ fun NseTopNavigationBar(
             }
         }
     }
+}
+
+@Composable
+fun ServerSettingsDialog(
+    currentBaseUrl: String,
+    onDismiss: () -> Unit,
+    onSaveBaseUrl: (String) -> String?,
+    onResetDefault: () -> Unit
+) {
+    var inputUrl by remember(currentBaseUrl) { mutableStateOf(currentBaseUrl) }
+    var validationError by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = CharcoalSurface,
+        titleContentColor = CrispWhite,
+        textContentColor = MutedSilver,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Dns,
+                    contentDescription = "Server Configuration",
+                    tint = NseCrimson
+                )
+                Text(
+                    text = "Server Configuration",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = CrispWhite,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Configure the centralized movie catalog API base URL. Default uses the legitimate public-domain cinema catalog (${ApiConfig.DEFAULT_BASE_URL}).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MutedSilver
+                )
+                OutlinedTextField(
+                    value = inputUrl,
+                    onValueChange = {
+                        inputUrl = it
+                        validationError = null
+                    },
+                    label = { Text("API Base URL") },
+                    singleLine = true,
+                    isError = validationError != null,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NseCrimson,
+                        unfocusedBorderColor = SlateCardBorder,
+                        focusedTextColor = CrispWhite,
+                        unfocusedTextColor = CrispWhite,
+                        focusedLabelColor = NseCrimson,
+                        unfocusedLabelColor = MutedSilver
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("server_url_input")
+                )
+                if (validationError != null) {
+                    Text(
+                        text = validationError!!,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = NseCrimson
+                    )
+                }
+                Text(
+                    text = "NSE STREAM v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MutedSilver
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val error = onSaveBaseUrl(inputUrl)
+                    if (error != null) {
+                        validationError = error
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = NseCrimson,
+                    contentColor = CrispWhite
+                ),
+                modifier = Modifier.testTag("server_save_button")
+            ) {
+                Text("Save & Reload")
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TextButton(
+                    onClick = onResetDefault,
+                    modifier = Modifier.testTag("server_reset_button")
+                ) {
+                    Text("Reset Default", color = MutedSilver)
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel", color = CrispWhite)
+                }
+            }
+        }
+    )
 }

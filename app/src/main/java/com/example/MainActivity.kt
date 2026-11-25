@@ -58,6 +58,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.remote.ApiConfig
 import com.example.model.CategorySectionState
 import com.example.model.MovieCategory
 import com.example.ui.components.CategorySectionRow
@@ -65,7 +66,9 @@ import com.example.ui.components.ContinueWatchingStrip
 import com.example.ui.components.HeroSpotlightBanner
 import com.example.ui.components.MovieDetailScreen
 import com.example.ui.components.MoviePosterCard
+import com.example.ui.components.NetworkErrorCard
 import com.example.ui.components.NseTopNavigationBar
+import com.example.ui.components.ServerSettingsDialog
 import com.example.ui.components.YouTubeExoPlayerScreen
 import com.example.ui.theme.CharcoalSurface
 import com.example.ui.theme.CrispWhite
@@ -79,6 +82,7 @@ import com.example.viewmodel.NseStreamViewModel
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ApiConfig.init(this)
         coil.Coil.setImageLoader(NseSafeImageLoader.get(this))
         enableEdgeToEdge()
         setContent {
@@ -127,6 +131,7 @@ fun NseStreamApp(
         uiState.currentCatalogPage.totalPages,
         uiState.isLoadingMoreGrid,
         uiState.isLoadingPage,
+        uiState.catalogErrorMessage,
         uiState.activeCategory,
         uiState.isSearchActive
     ) {
@@ -136,6 +141,7 @@ fun NseStreamApp(
                 uiState.activeCategory == MovieCategory.MY_LIST ||
                 uiState.isLoadingPage ||
                 uiState.isLoadingMoreGrid ||
+                uiState.catalogErrorMessage != null ||
                 uiState.currentCatalogPage.currentPage >= uiState.currentCatalogPage.totalPages ||
                 uiState.currentCatalogPage.items.isEmpty()
             ) {
@@ -153,13 +159,17 @@ fun NseStreamApp(
         }
     }
 
-    // 1. Full-screen YouTube-style Media3 ExoPlayer with Screen Rotation & Zero-Crop Original Ratio
+    // 1. Full-screen Media3 ExoPlayer with HLS/MP4, Screen Rotation & Error Recovery
     val activePlayingMovie = uiState.activePlayingMovie
     if (activePlayingMovie != null) {
         YouTubeExoPlayerScreen(
             movie = activePlayingMovie,
             streamUrl = uiState.activePlayableStreamUrl,
             initialPositionMs = uiState.activeResumePositionMs,
+            isResolvingStream = uiState.isResolvingStream,
+            streamErrorMessage = uiState.activeStreamError,
+            playbackAttemptId = uiState.playbackAttemptId,
+            onRetryStream = { viewModel.retryActivePlayback() },
             onSaveProgress = { posMs, durMs ->
                 viewModel.saveCurrentPlaybackProgress(activePlayingMovie, posMs, durMs)
             },
@@ -177,8 +187,11 @@ fun NseStreamApp(
             movie = detailMovie,
             isInWatchlist = watchlistIds.contains(detailMovie.id),
             savedProgressMs = progressByMovieId[detailMovie.id]?.positionMs ?: 0L,
+            isLoadingStreams = uiState.isLoadingDetailStreams,
+            streamErrorMessage = uiState.detailStreamError,
             relatedMovies = uiState.relatedMoviesForDetail,
             onPlayMovie = { movie -> viewModel.startMoviePlayback(movie) },
+            onRetryStreams = { viewModel.retryDetailStreams() },
             onToggleWatchlist = { movie -> viewModel.toggleWatchlist(movie) },
             onSelectRelatedMovie = { movie -> viewModel.openMovieDetail(movie) },
             onClose = { viewModel.closeMovieDetail() }
@@ -196,7 +209,7 @@ fun NseStreamApp(
         }
     }
 
-    // 3. Main Categorized Sections & Infinite-Scroll Discovery Interface (No bottom page bar)
+    // 3. Main Categorized Sections & Infinite-Scroll Discovery Interface
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
@@ -216,6 +229,7 @@ fun NseStreamApp(
                         viewModel.clearSearch()
                     }
                 },
+                onOpenServerSettings = { viewModel.openServerSettings() },
                 onSearchQueryChange = { viewModel.updateSearchQuery(it) },
                 onSearchSubmit = { viewModel.submitSearch(it) },
                 onClearSearch = { viewModel.clearSearch() },
@@ -232,241 +246,285 @@ fun NseStreamApp(
             val isHomeSectionsMode = uiState.activeCategory == MovieCategory.HOME && !uiState.isSearchActive
 
             if (isHomeSectionsMode) {
-                // Dedicated Category Sections Home View (Bangla, Hollywood, Bollywood, South Indian, Dual Audio)
-                LazyColumn(
-                    contentPadding = PaddingValues(vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(22.dp),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .testTag("home_category_sections_list")
-                ) {
-                    val heroMovie = uiState.featuredHeroMovie
-                    if (heroMovie != null) {
-                        item(key = "hero_banner") {
-                            HeroSpotlightBanner(
-                                movie = heroMovie,
-                                isInWatchlist = watchlistIds.contains(heroMovie.id),
-                                onPlayClick = { viewModel.startMoviePlayback(it) },
-                                onDetailsClick = { viewModel.openMovieDetail(it) },
-                                onToggleWatchlist = { viewModel.toggleWatchlist(it) },
-                                modifier = Modifier.padding(horizontal = 16.dp)
-                            )
-                        }
-                    }
-
-                    if (watchProgressList.isNotEmpty()) {
-                        item(key = "continue_watching") {
-                            ContinueWatchingStrip(
-                                progressItems = watchProgressList,
-                                onResumeClick = { viewModel.resumeMovieFromProgress(it) },
-                                modifier = Modifier.padding(horizontal = 16.dp)
-                            )
-                        }
-                    }
-
-                    items(
-                        items = MovieCategory.dedicatedContentCategories,
-                        key = { it.name }
-                    ) { category ->
-                        val sectionState = uiState.categorySections[category]
-                            ?: CategorySectionState(category = category, isLoadingInitial = true)
-                        CategorySectionRow(
-                            section = sectionState,
-                            onSeeAllClick = { viewModel.selectCategory(category) },
-                            onMovieClick = { viewModel.openMovieDetail(it) },
-                            onQuickPlayClick = { viewModel.startMoviePlayback(it) },
-                            onLoadMore = { viewModel.loadMoreForHomeSection(category) }
+                if (uiState.homeGlobalError != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(20.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        NetworkErrorCard(
+                            title = "Unable to Connect to Server",
+                            message = uiState.homeGlobalError!!,
+                            onRetry = { viewModel.loadAllHomeCategorySections(forceRefresh = true) },
+                            onOpenServerSettings = { viewModel.openServerSettings() },
+                            retryTag = "home_global_retry_button"
                         )
                     }
+                } else {
+                    LazyColumn(
+                        contentPadding = PaddingValues(vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(22.dp),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("home_category_sections_list")
+                    ) {
+                        val heroMovie = uiState.featuredHeroMovie
+                        if (heroMovie != null) {
+                            item(key = "hero_banner") {
+                                HeroSpotlightBanner(
+                                    movie = heroMovie,
+                                    isInWatchlist = watchlistIds.contains(heroMovie.id),
+                                    onPlayClick = { viewModel.startMoviePlayback(it) },
+                                    onDetailsClick = { viewModel.openMovieDetail(it) },
+                                    onToggleWatchlist = { viewModel.toggleWatchlist(it) },
+                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                )
+                            }
+                        }
 
-                    item(key = "bottom_spacer") {
-                        Spacer(modifier = Modifier.height(16.dp))
+                        if (watchProgressList.isNotEmpty()) {
+                            item(key = "continue_watching") {
+                                ContinueWatchingStrip(
+                                    progressItems = watchProgressList,
+                                    onResumeClick = { viewModel.resumeMovieFromProgress(it) },
+                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                )
+                            }
+                        }
+
+                        items(
+                            items = MovieCategory.dedicatedContentCategories,
+                            key = { it.name }
+                        ) { category ->
+                            val sectionState = uiState.categorySections[category]
+                                ?: CategorySectionState(category = category, isLoadingInitial = true)
+                            CategorySectionRow(
+                                section = sectionState,
+                                onSeeAllClick = { viewModel.selectCategory(category) },
+                                onMovieClick = { viewModel.openMovieDetail(it) },
+                                onQuickPlayClick = { viewModel.startMoviePlayback(it) },
+                                onLoadMore = { viewModel.loadMoreForHomeSection(category) },
+                                onRetrySection = { viewModel.retryCategorySection(category) }
+                            )
+                        }
+
+                        item(key = "bottom_spacer") {
+                            Spacer(modifier = Modifier.height(16.dp))
+                        }
                     }
                 }
             } else {
-                // Dedicated Category ("See All") or Search View with Automatic Infinite Scroll
                 val columns = when {
                     maxWidth >= 840.dp -> 4
                     maxWidth >= 600.dp -> 3
                     else -> 2
                 }
 
-                if (uiState.isLoadingPage) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                when {
+                    uiState.isLoadingPage -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
                         ) {
-                            CircularProgressIndicator(color = NseCrimson)
-                            Text(
-                                text = "Loading ${uiState.currentCatalogPage.queryOrCategoryKey}...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MutedSilver
-                            )
-                        }
-                    }
-                } else {
-                    LazyVerticalGrid(
-                        state = gridState,
-                        columns = GridCells.Fixed(columns),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .testTag("category_movie_grid")
-                    ) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = CharcoalSurface,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .border(1.dp, SlateCardBorder, RoundedCornerShape(10.dp))
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(ObsidianBlack)
-                                                .border(1.dp, SlateCardBorder, RoundedCornerShape(8.dp))
-                                                .clickable {
-                                                    if (uiState.isSearchActive) {
-                                                        isSearchExpanded = false
-                                                        viewModel.clearSearch()
-                                                    } else {
-                                                        viewModel.selectCategory(MovieCategory.HOME)
-                                                    }
-                                                }
-                                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                                                .testTag("back_to_home_sections_button")
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(
-                                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                                    contentDescription = "Back to all categories",
-                                                    tint = CrispWhite,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text(
-                                                    text = "Sections",
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    color = CrispWhite
-                                                )
-                                            }
-                                        }
-
-                                        Text(
-                                            text = uiState.currentCatalogPage.queryOrCategoryKey,
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = CrispWhite,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-
-                                    Text(
-                                        text = "${uiState.currentCatalogPage.items.size} Movies",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = NseCrimson,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                            }
-                        }
-
-                        if (uiState.currentCatalogPage.items.isEmpty()) {
-                            item(span = { GridItemSpan(maxLineSpan) }) {
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = CharcoalSurface,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 28.dp)
-                                        .border(1.dp, SlateCardBorder, RoundedCornerShape(14.dp))
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(28.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.MovieFilter,
-                                            contentDescription = "No movies found",
-                                            tint = NseCrimson,
-                                            modifier = Modifier.size(48.dp)
-                                        )
-                                        Text(
-                                            text = if (uiState.activeCategory == MovieCategory.MY_LIST) {
-                                                "Your Watchlist is Empty"
-                                            } else {
-                                                "No Matching Movies Found"
-                                            },
-                                            style = MaterialTheme.typography.titleLarge,
-                                            color = CrispWhite
-                                        )
-                                        Text(
-                                            text = if (uiState.activeCategory == MovieCategory.MY_LIST) {
-                                                "Tap '+ My List' on any movie card or detail screen to save titles locally on your device."
-                                            } else {
-                                                "Try searching another title or switch to Bangla, Hollywood, or Bollywood Movies."
-                                            },
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MutedSilver,
-                                            textAlign = TextAlign.Center
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            items(
-                                items = uiState.currentCatalogPage.items,
-                                key = { it.id }
-                            ) { movie ->
-                                MoviePosterCard(
-                                    movie = movie,
-                                    onMovieClick = { viewModel.openMovieDetail(it) },
-                                    onQuickPlayClick = { viewModel.startMoviePlayback(it) }
+                                CircularProgressIndicator(color = NseCrimson)
+                                Text(
+                                    text = "Loading ${uiState.currentCatalogPage.queryOrCategoryKey}...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MutedSilver
                                 )
                             }
                         }
-
-                        if (uiState.isLoadingMoreGrid) {
+                    }
+                    uiState.catalogErrorMessage != null -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(20.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            NetworkErrorCard(
+                                title = "Failed to Load Movies",
+                                message = uiState.catalogErrorMessage!!,
+                                onRetry = { viewModel.retryCurrentCatalog() },
+                                onOpenServerSettings = { viewModel.openServerSettings() },
+                                retryTag = "catalog_retry_button"
+                            )
+                        }
+                    }
+                    else -> {
+                        LazyVerticalGrid(
+                            state = gridState,
+                            columns = GridCells.Fixed(columns),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("category_movie_grid")
+                        ) {
                             item(span = { GridItemSpan(maxLineSpan) }) {
-                                Box(
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = CharcoalSurface,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(vertical = 16.dp),
-                                    contentAlignment = Alignment.Center
+                                        .border(1.dp, SlateCardBorder, RoundedCornerShape(10.dp))
                                 ) {
-                                    CircularProgressIndicator(
-                                        color = NseCrimson,
-                                        modifier = Modifier.size(28.dp),
-                                        strokeWidth = 2.5.dp
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(ObsidianBlack)
+                                                    .border(1.dp, SlateCardBorder, RoundedCornerShape(8.dp))
+                                                    .clickable {
+                                                        if (uiState.isSearchActive) {
+                                                            isSearchExpanded = false
+                                                            viewModel.clearSearch()
+                                                        } else {
+                                                            viewModel.selectCategory(MovieCategory.HOME)
+                                                        }
+                                                    }
+                                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                                    .testTag("back_to_home_sections_button")
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(
+                                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                                        contentDescription = "Back to all categories",
+                                                        tint = CrispWhite,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "Sections",
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        color = CrispWhite
+                                                    )
+                                                }
+                                            }
+
+                                            Text(
+                                                text = uiState.currentCatalogPage.queryOrCategoryKey,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = CrispWhite,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+
+                                        Text(
+                                            text = "${uiState.currentCatalogPage.items.size} Movies",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = NseCrimson,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (uiState.currentCatalogPage.items.isEmpty()) {
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = CharcoalSurface,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 28.dp)
+                                            .border(1.dp, SlateCardBorder, RoundedCornerShape(14.dp))
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(28.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.MovieFilter,
+                                                contentDescription = "No movies found",
+                                                tint = NseCrimson,
+                                                modifier = Modifier.size(48.dp)
+                                            )
+                                            Text(
+                                                text = if (uiState.activeCategory == MovieCategory.MY_LIST) {
+                                                    "Your Watchlist is Empty"
+                                                } else {
+                                                    "No Matching Movies Found"
+                                                },
+                                                style = MaterialTheme.typography.titleLarge,
+                                                color = CrispWhite
+                                            )
+                                            Text(
+                                                text = if (uiState.activeCategory == MovieCategory.MY_LIST) {
+                                                    "Tap 'My List' on any movie banner or detail screen to save titles locally on your device."
+                                                } else {
+                                                    "Try searching another movie title or switch to Bangla, Hollywood, or Bollywood Movies."
+                                                },
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MutedSilver,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                items(
+                                    items = uiState.currentCatalogPage.items,
+                                    key = { it.id }
+                                ) { movie ->
+                                    MoviePosterCard(
+                                        movie = movie,
+                                        onMovieClick = { viewModel.openMovieDetail(it) },
+                                        onQuickPlayClick = { viewModel.startMoviePlayback(it) }
                                     )
                                 }
                             }
-                        }
 
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            Spacer(modifier = Modifier.height(12.dp))
+                            if (uiState.isLoadingMoreGrid) {
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(
+                                            color = NseCrimson,
+                                            modifier = Modifier.size(28.dp),
+                                            strokeWidth = 2.5.dp
+                                        )
+                                    }
+                                }
+                            }
+
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    if (uiState.showServerSettingsDialog) {
+        ServerSettingsDialog(
+            currentBaseUrl = uiState.currentApiBaseUrl,
+            onDismiss = { viewModel.dismissServerSettings() },
+            onSaveBaseUrl = { rawUrl -> viewModel.saveServerBaseUrl(rawUrl) },
+            onResetDefault = { viewModel.resetServerBaseUrl() }
+        )
     }
 }

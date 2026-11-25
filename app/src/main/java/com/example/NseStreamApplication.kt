@@ -12,7 +12,7 @@ import coil.decode.Decoder
 import coil.disk.DiskCache
 import coil.fetch.SourceResult
 import coil.request.Options
-import com.example.data.remote.MovieLinkBdClient
+import com.example.data.remote.ApiConfig
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -24,14 +24,15 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
- * Custom Application & Coil ImageLoader configuration that prevents Android's native
- * `HeifDecoderImpl` (`getSize: not supported!` / `decode: videoFrame is a nullptr`) from
- * ever being invoked when remote movie posters contain HEIF/HEIC/AVIF (`ftyp`) containers.
+ * Application entry point for NSE STREAM v1.0.1.
+ * Initializes centralized `ApiConfig` and configures a resilient Coil `ImageLoader`
+ * that guards against unsupported HEIF/HEIC/AVIF streams and handles broken poster URLs cleanly.
  */
 class NseStreamApplication : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        ApiConfig.init(this)
         Coil.setImageLoader(this)
     }
 
@@ -45,7 +46,6 @@ object NseSafeImageLoader {
     @Volatile
     private var instance: ImageLoader? = null
 
-    // Valid 1x1 transparent PNG fallback so BitmapFactory never touches unsupported HEIF/AVIF streams
     internal val TRANSPARENT_1X1_PNG_BYTES: ByteArray = byteArrayOf(
         0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
         0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
@@ -66,16 +66,11 @@ object NseSafeImageLoader {
         }
     }
 
-    /**
-     * Detects ISO BMFF (`ftyp`) headers used by HEIF, HEIC, and AVIF images that trigger
-     * `E/HeifDecoderImpl: getSize: not supported!` on Android emulators without hardware HEVC/AV1 decoders.
-     */
     internal fun isHeifOrAvifBytes(header: ByteArray, contentType: String? = null): Boolean {
         val lowerMime = contentType?.lowercase(Locale.US).orEmpty()
         if (lowerMime.contains("heif") || lowerMime.contains("heic") || lowerMime.contains("avif")) {
             return true
         }
-        // ISO Base Media File Format box header has 'f', 't', 'y', 'p' at bytes 4..7
         if (header.size >= 8 &&
             header[4] == 'f'.code.toByte() &&
             header[5] == 't'.code.toByte() &&
@@ -91,6 +86,8 @@ object NseSafeImageLoader {
         val okHttpClient = OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
             .addInterceptor(SafeImageFormatInterceptor())
             .build()
 
@@ -102,7 +99,7 @@ object NseSafeImageLoader {
             }
             .diskCache {
                 DiskCache.Builder()
-                    .directory(context.cacheDir.resolve("nse_safe_image_cache_v2"))
+                    .directory(context.cacheDir.resolve("nse_safe_image_cache_v3"))
                     .maxSizePercent(0.04)
                     .build()
             }
@@ -110,32 +107,25 @@ object NseSafeImageLoader {
             .build()
     }
 
-    /**
-     * OkHttp Interceptor that:
-     * 1. Explicitly requests only JPEG, PNG, or WebP (`Accept: image/jpeg,image/png,image/webp;q=0.9`).
-     * 2. Inspects the first 16 bytes of every image response for HEIF/HEIC/AVIF (`ftyp`) containers.
-     * 3. Transparently transcodes any HEIF/HEIC/AVIF poster to standard baseline JPEG via `wsrv.nl`,
-     *    or falls back to a valid 1x1 PNG so `HeifDecoderImpl` is never called.
-     */
     internal class SafeImageFormatInterceptor : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
             val originalRequest = chain.request()
             val originalUrl = originalRequest.url.toString()
 
             val safeRequest = originalRequest.newBuilder()
-                .header("User-Agent", MovieLinkBdClient.USER_AGENT)
+                .header("User-Agent", ApiConfig.USER_AGENT)
                 .header("Accept", "image/jpeg,image/png,image/webp;q=0.9")
-                .header("Referer", MovieLinkBdClient.BASE_URL)
                 .build()
 
             val response = try {
                 chain.proceed(safeRequest)
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 return createFallbackPngResponse(safeRequest)
             }
 
             if (!response.isSuccessful) {
-                return response
+                response.close()
+                return createFallbackPngResponse(safeRequest)
             }
 
             val peekedHeader = try {
@@ -148,17 +138,15 @@ object NseSafeImageLoader {
                 return response
             }
 
-            // Close the unsupported HEIF/AVIF response body immediately
             response.close()
 
-            // Attempt on-the-fly JPEG conversion via wsrv.nl if not already proxied
             if (!originalUrl.contains("wsrv.nl", ignoreCase = true)) {
                 try {
                     val encodedUrl = URLEncoder.encode(originalUrl, "UTF-8")
                     val proxyUrl = "https://wsrv.nl/?url=$encodedUrl&output=jpg&w=480&q=82"
                     val proxyRequest = originalRequest.newBuilder()
                         .url(proxyUrl)
-                        .header("User-Agent", MovieLinkBdClient.USER_AGENT)
+                        .header("User-Agent", ApiConfig.USER_AGENT)
                         .header("Accept", "image/jpeg,image/png;q=0.9")
                         .build()
                     val proxyResponse = chain.proceed(proxyRequest)
@@ -189,11 +177,6 @@ object NseSafeImageLoader {
         }
     }
 
-    /**
-     * Secondary safeguard inside Coil's decoder pipeline: if any cached or local stream
-     * contains an ISO BMFF (`ftyp`) header, intercept it before `BitmapFactoryDecoder`
-     * so `SkHeifCodec` / `HeifDecoderImpl` is never invoked.
-     */
     internal class HeifGuardDecoderFactory : Decoder.Factory {
         override fun create(
             result: SourceResult,

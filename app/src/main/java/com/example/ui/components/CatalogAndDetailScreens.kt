@@ -35,9 +35,12 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Hd
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -64,6 +67,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -83,8 +87,118 @@ import com.example.ui.theme.SignalEmerald
 import com.example.ui.theme.SlateCardBorder
 
 /**
+ * Reusable dark-cinema network/server error state with Retry and optional Server Settings action.
+ */
+@Composable
+fun NetworkErrorCard(
+    title: String = "Server Connection Problem",
+    message: String,
+    onRetry: () -> Unit,
+    onOpenServerSettings: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    retryTag: String = "network_retry_button"
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = CharcoalSurface,
+        modifier = modifier
+            .fillMaxWidth()
+            .border(1.dp, NseCrimson.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+            .testTag("network_error_card")
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(NseCrimson.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CloudOff,
+                    contentDescription = "Server Unavailable",
+                    tint = NseCrimson,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = CrispWhite,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MutedSilver,
+                textAlign = TextAlign.Center
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 4.dp)
+            ) {
+                Button(
+                    onClick = onRetry,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NseCrimson,
+                        contentColor = CrispWhite
+                    ),
+                    modifier = Modifier
+                        .height(48.dp)
+                        .testTag(retryTag)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Retry",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                if (onOpenServerSettings != null) {
+                    OutlinedButton(
+                        onClick = onOpenServerSettings,
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = GraphiteElevated,
+                            contentColor = CrispWhite
+                        ),
+                        modifier = Modifier
+                            .height(48.dp)
+                            .testTag("error_server_settings_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Dns,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Server",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
  * Dedicated Horizontal Category Row (e.g., Bangla Movies, Hollywood Movies, Bollywood Movies)
- * with "See All" navigation and automatic horizontal infinite scroll.
+ * with "See All" navigation, automatic horizontal infinite scroll, and section error retry.
  */
 @Composable
 fun CategorySectionRow(
@@ -93,6 +207,7 @@ fun CategorySectionRow(
     onMovieClick: (MovieItem) -> Unit,
     onQuickPlayClick: (MovieItem) -> Unit,
     onLoadMore: () -> Unit,
+    onRetrySection: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
@@ -106,7 +221,7 @@ fun CategorySectionRow(
     }
 
     LaunchedEffect(shouldLoadMore, section.items.size) {
-        if (shouldLoadMore && !section.isLoadingInitial && !section.isLoadingMore) {
+        if (shouldLoadMore && !section.isLoadingInitial && !section.isLoadingMore && section.errorMessage == null) {
             onLoadMore()
         }
     }
@@ -117,7 +232,6 @@ fun CategorySectionRow(
             .testTag("category_section_${section.category.id}"),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Section Header with Crimson Accent & "See All" Button
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -174,51 +288,63 @@ fun CategorySectionRow(
             }
         }
 
-        if (section.isLoadingInitial && section.items.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(210.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(
-                    color = NseCrimson,
-                    strokeWidth = 2.5.dp,
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-        } else {
-            LazyRow(
-                state = listState,
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                itemsIndexed(
-                    items = section.items,
-                    key = { _, item -> "${section.category.id}_${item.id}" }
-                ) { _, movie ->
-                    MoviePosterCard(
-                        movie = movie,
-                        onMovieClick = onMovieClick,
-                        onQuickPlayClick = onQuickPlayClick,
-                        modifier = Modifier.width(154.dp)
+        when {
+            section.isLoadingInitial && section.items.isEmpty() -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(210.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        color = NseCrimson,
+                        strokeWidth = 2.5.dp,
+                        modifier = Modifier.size(32.dp)
                     )
                 }
+            }
+            section.errorMessage != null && section.items.isEmpty() -> {
+                NetworkErrorCard(
+                    title = "Couldn't Load ${section.category.title}",
+                    message = section.errorMessage,
+                    onRetry = onRetrySection,
+                    retryTag = "retry_section_${section.category.id}",
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
+            else -> {
+                LazyRow(
+                    state = listState,
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    itemsIndexed(
+                        items = section.items,
+                        key = { _, item -> "${section.category.id}_${item.id}" }
+                    ) { _, movie ->
+                        MoviePosterCard(
+                            movie = movie,
+                            onMovieClick = onMovieClick,
+                            onQuickPlayClick = onQuickPlayClick,
+                            modifier = Modifier.width(154.dp)
+                        )
+                    }
 
-                if (section.isLoadingMore) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .width(72.dp)
-                                .height(210.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(
-                                color = NseCrimson,
-                                strokeWidth = 2.5.dp,
-                                modifier = Modifier.size(28.dp)
-                            )
+                    if (section.isLoadingMore) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .width(72.dp)
+                                    .height(210.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = NseCrimson,
+                                    strokeWidth = 2.5.dp,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -501,10 +627,6 @@ fun ContinueWatchingStrip(
     }
 }
 
-/**
- * Minimalist Netflix-style Movie Poster Card displaying only the poster artwork,
- * star rating badge, quick-play trigger, movie title, and release year.
- */
 @Composable
 fun MoviePosterCard(
     movie: MovieItem,
@@ -556,7 +678,6 @@ fun MoviePosterCard(
                         )
                 )
 
-                // Minimalist Top-Left Rating Badge
                 Surface(
                     shape = RoundedCornerShape(6.dp),
                     color = ObsidianBlack.copy(alpha = 0.82f),
@@ -584,27 +705,31 @@ fun MoviePosterCard(
                     }
                 }
 
-                // Quick Play Button
                 IconButton(
                     onClick = { onQuickPlayClick(movie) },
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(8.dp)
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(NseCrimson)
+                        .padding(6.dp)
+                        .size(48.dp)
                         .testTag("quick_play_${movie.id}")
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Play ${movie.title}",
-                        tint = CrispWhite,
-                        modifier = Modifier.size(22.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(NseCrimson),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Play ${movie.title}",
+                            tint = CrispWhite,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
             }
 
-            // Minimalist Footer: Title + Release Year Only
             Column(
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
@@ -632,8 +757,11 @@ fun MovieDetailScreen(
     movie: MovieItem,
     isInWatchlist: Boolean,
     savedProgressMs: Long,
+    isLoadingStreams: Boolean,
+    streamErrorMessage: String?,
     relatedMovies: List<MovieItem>,
     onPlayMovie: (MovieItem) -> Unit,
+    onRetryStreams: () -> Unit,
     onToggleWatchlist: (MovieItem) -> Unit,
     onSelectRelatedMovie: (MovieItem) -> Unit,
     onClose: () -> Unit
@@ -703,7 +831,8 @@ fun MovieDetailScreen(
                     .clip(CircleShape)
                     .background(NseCrimson.copy(alpha = 0.92f))
                     .clickable { onPlayMovie(movie) }
-                    .align(Alignment.Center),
+                    .align(Alignment.Center)
+                    .testTag("detail_center_play_button"),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -807,7 +936,7 @@ fun MovieDetailScreen(
                 val playLabel = if (savedProgressMs > 5_000L) {
                     "Resume Movie (${formatDurationMs(savedProgressMs)})"
                 } else {
-                    "Stream Now (Fast-Start HD)"
+                    "Play Movie"
                 }
                 Text(
                     text = playLabel,
@@ -836,6 +965,15 @@ fun MovieDetailScreen(
                 Text(
                     text = if (isInWatchlist) "Saved in My List" else "Add to My List",
                     style = MaterialTheme.typography.labelLarge
+                )
+            }
+
+            if (streamErrorMessage != null) {
+                NetworkErrorCard(
+                    title = "Stream Unavailable",
+                    message = streamErrorMessage,
+                    onRetry = onRetryStreams,
+                    retryTag = "detail_retry_streams_button"
                 )
             }
 
@@ -877,20 +1015,24 @@ fun MovieDetailScreen(
                             color = CrispWhite
                         )
                     }
-                    Text(
-                        text = "Cast: ${movie.cast.joinToString(", ")}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MutedSilver
-                    )
-                    val qualitiesSummary = if (movie.qualityOptions.isNotEmpty()) {
-                        movie.qualityOptions.joinToString(" • ") { it.badgeDetail }
-                    } else {
-                        "Resolving direct HD streams (${movie.videoResolution})..."
+                    if (movie.director.isNotBlank()) {
+                        Text(
+                            text = "Studio / Creator: ${movie.director}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MutedSilver
+                        )
+                    }
+                    val qualitiesSummary = when {
+                        movie.qualityOptions.isNotEmpty() ->
+                            movie.qualityOptions.joinToString(" • ") { it.badgeDetail }
+                        isLoadingStreams -> "Checking available HLS & MP4 streams..."
+                        streamErrorMessage != null -> "Streams currently unavailable"
+                        else -> "Tap Play to load available streams"
                     }
                     Text(
-                        text = "Direct Streams: $qualitiesSummary",
+                        text = "Available Streams: $qualitiesSummary",
                         style = MaterialTheme.typography.labelSmall,
-                        color = SignalEmerald
+                        color = if (streamErrorMessage != null) NseCrimson else SignalEmerald
                     )
                 }
             }
@@ -906,18 +1048,17 @@ fun MovieDetailScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    content = {
-                        relatedMovies.forEach { related ->
-                            MoviePosterCard(
-                                movie = related,
-                                onMovieClick = onSelectRelatedMovie,
-                                onQuickPlayClick = onPlayMovie,
-                                modifier = Modifier.width(150.dp)
-                            )
-                        }
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    relatedMovies.forEach { related ->
+                        MoviePosterCard(
+                            movie = related,
+                            onMovieClick = onSelectRelatedMovie,
+                            onQuickPlayClick = onPlayMovie,
+                            modifier = Modifier.width(150.dp)
+                        )
                     }
-                )
+                }
             }
 
             Spacer(modifier = Modifier.height(24.dp))

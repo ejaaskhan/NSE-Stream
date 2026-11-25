@@ -1,13 +1,16 @@
 <resources>
     <string name="app_name">NSE Stream</string>
-    <string name="brand_tagline">ULTRA HD CINEMA</string>
-    <string name="search_hint">Search movies, genres, directors, actors…</string>
+    <string name="search_hint">Search Bangla, Hollywood, Bollywood, South Indian…</string>
     <string name="play_now">Play Now</string>
     <string name="my_list">My List</string>
     <string name="in_my_list">In My List</string>
-    <string name="page_prev">Prev</string>
-    <string name="page_next">Next</string>
-    <string name="page_jump">Jump</string>
+    <string name="retry">Retry</string>
+    <string name="server_settings">Server Settings</string>
+    <string name="server_url_label">API Base URL</string>
+    <string name="server_reset_default">Reset Default</string>
+    <string name="server_save">Save &amp; Reload</string>
+    <string name="network_error_title">Server Connection Problem</string>
+    <string name="stream_unavailable_title">Stream Unavailable</string>
     <string name="double_tap_back">10 seconds</string>
     <string name="double_tap_forward">10 seconds</string>
 </resources>
