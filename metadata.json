@@ -1,0 +1,6 @@
+{
+  "name": "NSE Stream",
+  "description": "Netflix-style movie discovery and streaming app with page-based navigation and YouTube-style ExoPlayer controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
