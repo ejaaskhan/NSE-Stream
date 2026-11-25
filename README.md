@@ -28,37 +28,32 @@
 
 This repository includes two ready-to-run GitHub Actions workflows in `.github/workflows/`:
 
-1. **`.github/workflows/android-apk.yml`** — Builds `NSE-Stream-<tag>-debug.apk` (plus a signed release APK when signing secrets are provided), generates `SHA256SUMS.txt`, uploads downloadable workflow artifacts, and automatically publishes a **GitHub Release** for any `v*` tag push.
+1. **`.github/workflows/android-apk.yml`** — Builds **both** `NSE-Stream-v1.0.1.apk` (`.apk`) and `NSE-Stream-v1.0.1.aab` (`.aab`) plus `SHA256SUMS.txt` (and signed `-release.apk` / `-release.aab` when signing secrets are configured), uploads them as workflow artifacts, and **automatically attaches them to the `v1.0.1` GitHub Release** on:
+   - Push to `main` / `master`
+   - Pushing a `v*` tag (e.g., `v1.0.1`)
+   - Creating, editing, or publishing a GitHub Release in the GitHub UI
+   - Manual **Run workflow** (`workflow_dispatch`)
 2. **`.github/workflows/android-tests.yml`** — Runs the full JVM unit test and Robolectric Compose UI test suite (`gradle :app:testDebugUnitTest`) on every push, pull request, and tag.
 
-### Option A — Trigger Automatically via Git Tag (`v1.0.1`)
+### How to Attach `.apk` and `.aab` to Release `v1.0.1`
 
-Push your commits and create the `v1.0.1` tag:
+1. Push the updated repository to `main` (or push tag `v1.0.1`):
+   ```bash
+   git add .
+   git commit -m "Attach APK and AAB to v1.0.1 GitHub Release"
+   git push origin main
+   ```
+2. Wait ~3 minutes for **Actions → Build & Release NSE Stream (APK + AAB)** to finish.
+3. Open **Releases → v1.0.1 → Assets** — you will now see:
+   - `NSE-Stream-v1.0.1.apk`
+   - `NSE-Stream-v1.0.1.aab`
+   - `SHA256SUMS.txt`
 
-```bash
-git add .
-git commit -m "Release NSE STREAM v1.0.1"
-git push origin main
+*(Make sure GitHub **Settings → Actions → General → Workflow permissions** is set to **Read and write permissions** if your repo restricts default workflow writes.)*
 
-git tag -a v1.0.1 -m "NSE STREAM v1.0.1"
-git push origin v1.0.1
-```
+### Optional: Signed Release `.apk` & `.aab` on GitHub Actions
 
-GitHub Actions will automatically:
-1. Set up **JDK 21**, **Gradle 9.3.1**, and **Android SDK 36.1**.
-2. Build `NSE-Stream-v1.0.1-debug.apk` and compute `SHA256SUMS.txt`.
-3. Attach the APK directly to the **GitHub Release** for tag `v1.0.1` under **Releases** and as a build artifact under **Actions**.
-
-### Option B — Build Manually from GitHub Actions UI
-
-1. Open your repository on GitHub and click the **Actions** tab.
-2. Select **Build & Release NSE Stream APK**.
-3. Click **Run workflow**, keep `release_tag` as `v1.0.1`, check **Create or update GitHub Release with APK attached**, and click **Run workflow**.
-4. Download the APK from **Releases → v1.0.1** or from the workflow run's **Artifacts** section.
-
-### Optional: Signed Release APK on GitHub Actions
-
-Debug APKs build out of the box with no secrets required. To also produce a signed `NSE-Stream-v1.0.1-release.apk`, add these repository secrets under **Settings → Secrets and variables → Actions**:
+Debug-signed `.apk` and `.aab` files build and attach automatically with no secrets required. To also publish signed `NSE-Stream-v1.0.1-release.apk` and `NSE-Stream-v1.0.1-release.aab`, add these repository secrets under **Settings → Secrets and variables → Actions**:
 
 | Secret Name | Description |
 | :--- | :--- |
@@ -78,17 +73,18 @@ Debug APKs build out of the box with no secrets required. To also produce a sign
 ### Commands
 
 ```bash
-# Build Debug APK
-gradle :app:assembleDebug
+# Build Debug APK & AAB
+gradle :app:assembleDebug :app:bundleDebug
 
 # Run Unit & Robolectric UI Tests
 gradle :app:testDebugUnitTest
 ```
 
-The compiled debug APK is output to:
+Output paths:
 
 ```text
 app/build/outputs/apk/debug/app-debug.apk
+app/build/outputs/bundle/debug/app-debug.aab
 ```
 
 ---
