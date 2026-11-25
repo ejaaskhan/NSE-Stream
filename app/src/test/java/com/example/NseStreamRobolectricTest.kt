@@ -19,6 +19,7 @@ import com.example.ui.components.CategorySectionRow
 import com.example.ui.components.MovieDetailScreen
 import com.example.ui.components.NetworkErrorCard
 import com.example.ui.components.NseBrandLogo
+import com.example.ui.components.NseSplashScreen
 import com.example.ui.components.NseTopNavigationBar
 import com.example.ui.components.ServerSettingsDialog
 import com.example.ui.components.YouTubeExoPlayerScreen
@@ -90,6 +91,36 @@ class NseStreamRobolectricTest {
             emptyList()
         }
     )
+
+    @Test
+    fun verifySplashScreenDisplaysSubtitlePillWithoutCineShorts() {
+        var finished = false
+        composeTestRule.setContent {
+            MyApplicationTheme {
+                NseSplashScreen(
+                    onSplashFinished = { finished = true },
+                    durationMs = 2_200L
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("nse_splash_screen").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("splash_logo_emblem").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("splash_brand_title").assertIsDisplayed()
+        composeTestRule.onNodeWithText("NSE").assertIsDisplayed()
+        composeTestRule.onNodeWithText("STREAM").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("splash_subtitle_pill").assertIsDisplayed()
+        composeTestRule.onNodeWithText("A solution provided by Dev. E").assertIsDisplayed()
+        composeTestRule.onNodeWithText("CineShorts", substring = true, ignoreCase = true)
+            .assertDoesNotExist()
+        composeTestRule.onNodeWithText("MOVIELINKBD", substring = true, ignoreCase = true)
+            .assertDoesNotExist()
+
+        composeTestRule.mainClock.advanceTimeBy(2_500L)
+        composeTestRule.waitForIdle()
+        assertTrue("Expected splash screen to complete after duration", finished)
+    }
 
     @Test
     fun verifyBrandLogoRemovesMovielinkbdSubtitle() {

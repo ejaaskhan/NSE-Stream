@@ -1,10 +1,15 @@
 package com.example
 
+import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -67,6 +72,7 @@ import com.example.ui.components.HeroSpotlightBanner
 import com.example.ui.components.MovieDetailScreen
 import com.example.ui.components.MoviePosterCard
 import com.example.ui.components.NetworkErrorCard
+import com.example.ui.components.NseSplashScreen
 import com.example.ui.components.NseTopNavigationBar
 import com.example.ui.components.ServerSettingsDialog
 import com.example.ui.components.YouTubeExoPlayerScreen
@@ -84,10 +90,24 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         ApiConfig.init(this)
         coil.Coil.setImageLoader(NseSafeImageLoader.get(this))
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT)
+        )
         setContent {
             MyApplicationTheme {
-                NseStreamApp()
+                var showSplash by rememberSaveable { mutableStateOf(true) }
+                Box(modifier = Modifier.fillMaxSize().background(ObsidianBlack)) {
+                    NseStreamApp()
+                    AnimatedVisibility(
+                        visible = showSplash,
+                        exit = fadeOut(animationSpec = tween(durationMillis = 400))
+                    ) {
+                        NseSplashScreen(
+                            onSplashFinished = { showSplash = false }
+                        )
+                    }
+                }
             }
         }
     }

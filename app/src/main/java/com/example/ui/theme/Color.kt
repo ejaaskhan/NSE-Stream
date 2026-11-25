@@ -16,6 +16,11 @@ val SignalEmerald = Color(0xFF00E676)
 val AmberGold = Color(0xFFFFC107)
 val CyanTech = Color(0xFF00E5FF)
 
+// Splash Subtitle Warm Gold -> Sunset Orange Gradient Palette
+val SplashGoldLight = Color(0xFFFFD54F)
+val SplashGoldAmber = Color(0xFFFFA726)
+val SplashSunsetOrange = Color(0xFFFF6D00)
+
 val CrispWhite = Color(0xFFF5F5F7)
 val MutedSilver = Color(0xFFA0A3B1)
 val DimGrayText = Color(0xFF6E7180)
